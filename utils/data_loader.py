@@ -39,3 +39,12 @@ def compute_kpis(df):
         "units_sold": int(total_units),
         "delta_units": f"{delta_units_pct:+.1f}%",
     }
+
+def compute_filter_args(df): 
+    date_range = df['Date'].min(), df['Date'].max()
+
+    store_options = df['Store ID'].unique()
+    category_options = df['Category'].unique()
+    highest_price = df['Price'].max()
+    lowest_price = df['Price'].min()
+    return (date_range, store_options, category_options, (highest_price, lowest_price))
