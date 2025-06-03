@@ -1,17 +1,10 @@
 import dash
 from dash import html, dcc
 
+from components.layout import create_layout
 app = dash.Dash(__name__)
 
-app.layout = html.Div([
-    html.H1("Sales Dashboard"),
-    html.Div([
-        dcc.DatePickerRange(id='date-range'),
-        dcc.Dropdown(id='store-dropdown'),
-        dcc.Dropdown(id='category-dropdown'),
-    ]),
-    dcc.Graph(id='main-chart')
-])
+app.layout = create_layout()
 
 if __name__ == '__main__':
     app.run(debug=True)
