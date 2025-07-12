@@ -10,6 +10,22 @@ def load_data():
 
     return df
 
+def load_filtered_data(store, category, start_date, end_date, price):
+    df = load_data()
+    df['Date'] = pd.to_datetime(df['Date'])
+
+    # Apply filters
+    if store:
+        df = df[df['Store ID'] == store]
+    if category:
+        df = df[df['Category'] == category]
+    if start_date and end_date:
+        df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
+    if price:
+        df = df[df['Price'] <= price]
+
+    return df 
+
 def compute_kpis(df):
     df['Date'] = pd.to_datetime(df['Date'])
 

@@ -8,7 +8,7 @@ def initialize_cards(kpi_values):
     return html.Div([
             initialize_card("Total Sales", kpi_values["total_sales"], kpi_values["delta_sales"], sales_is_positive>0),
             initialize_card("Units Sold", kpi_values["units_sold"], kpi_values["delta_units"], units_is_positive>0),
-        ], className="card-container", id="cards")
+        ], className="kpi-row", id="cards")
 
 
 def initialize_card(title, value, delta, is_positive):

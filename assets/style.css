@@ -19,15 +19,26 @@ body {
     margin-bottom: 30px;
 }
 
-.left-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
+.chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
     gap: 20px;
 }
 
+.left-panel {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0; 
+    max-height: 600px; 
+}
+
 .full-height {
-    flex: 1;
+    flex: 1; 
+    max-width: 500px; 
+    max-height: 600px; 
+    overflow: auto;
 }
 
 /* KPI Section */

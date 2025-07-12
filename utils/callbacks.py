@@ -1,35 +1,11 @@
-import plotly.express as px
-import dash 
 from dash import Output, Input
-from utils.data_loader import load_data, compute_kpis
+from utils.data_loader import compute_kpis, load_filtered_data
 from components.cards import initialize_cards
 
-def register_callbacks(app):
-    @app.callback(
-        Output('graph-id', 'figure'),
-        Input('store-dropdown', 'value'),
-        Input('category-dropdown', 'value'),
-        Input('date-range', 'start_date'),
-        Input('date-range', 'end_date'), 
-        Input('price-slider', 'value')
-    )
+from utils.charts import generate_monthly_chart, generate_empty_graph, generate_inventory_sales_chart
 
-    def update_graph(store, category, start_date, end_date, price):
-        df = load_data()
-
-        # Apply filters
-        if store:
-            df = df[df['Store ID'] == store]
-        if category:
-            df = df[df['Category'] == category]
-        if start_date and end_date:
-            df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-        if price : 
-            df = df[df['Price'] <= price]
-
-        fig = px.line(df, x='Date', y='Units Sold', color='Store ID')
-        return fig
     
+def register_callbacks(app):
     @app.callback(
         Output('cards', 'children'),
         Input('store-dropdown', 'value'),
@@ -40,18 +16,40 @@ def register_callbacks(app):
     )
 
     def update_KPI(store, category, start_date, end_date, price):
-        df = load_data()
-
-        # Apply filters
-        if store:
-            df = df[df['Store ID'] == store]
-        if category:
-            df = df[df['Category'] == category]
-        if start_date and end_date:
-            df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-        if price : 
-            df = df[df['Price'] <= price]
-
+        df = load_filtered_data(store, category, start_date, end_date, price)
         kpi_values = compute_kpis(df)
-
         return initialize_cards(kpi_values)
+    
+    # Monthly sales 
+    @app.callback(
+        Output('graph-id', 'figure'),
+        Input('store-dropdown', 'value'),
+        Input('category-dropdown', 'value'),
+        Input('date-range', 'start_date'),
+        Input('date-range', 'end_date'), 
+        Input('price-slider', 'value')
+    )
+
+    def update_graph(store, category, start_date, end_date, price):
+        df = load_filtered_data(store, category, start_date, end_date, price)
+        
+        if df.empty:
+            return generate_empty_graph()
+
+        return generate_monthly_chart(df)
+    
+
+    @app.callback(
+            Output('inventory-sales-chart', 'figure'),
+            Input('store-dropdown', 'value'),
+            Input('category-dropdown', 'value'),
+            Input('date-range', 'start_date'),
+            Input('date-range', 'end_date'), 
+            Input('price-slider', 'value')
+        )
+    def update_graph(store, category, start_date, end_date, price):
+        df = load_filtered_data(store, category, start_date, end_date, price)
+        if df.empty:
+            return generate_empty_graph()
+
+        return generate_inventory_sales_chart(df, 10)
