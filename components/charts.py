@@ -108,7 +108,6 @@ def initialize_discount_vs_sales_chart(df):
     return dcc.Graph(id='discount-vs-sales-chart', figure=fig)
 
 
-
 def initialize_discount_vs_sales_scatter(df):
     # Show how discount percentage correlates with units sold
     if 'Discount' not in df.columns:
