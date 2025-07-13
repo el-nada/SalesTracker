@@ -2,7 +2,6 @@ import numpy as np
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 muted_blues = [
     "#8DA9C4", "#A3BCD6", "#C0D6DF", "#E5EFF5", "#B4C5D4", "#6C8AA3", "#345B73"

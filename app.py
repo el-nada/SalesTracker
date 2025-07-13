@@ -1,9 +1,7 @@
 import dash
-from dash import html, dcc
 
 from components.layout import create_layout
 from utils.callbacks import register_callbacks
-import dash_bootstrap_components 
 
 app = dash.Dash(__name__, external_stylesheets=[
     "https://fonts.googleapis.com/icon?family=Material+Icons",

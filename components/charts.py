@@ -1,7 +1,4 @@
 from dash import dcc
-import numpy as np
-import plotly.express as px
-import pandas as pd
 
 from utils.charts import generate_monthly_chart, generate_inventory_sales_chart, generate_category_treemap, generate_promo_impact, generate_discount_distribution, generate_avg_demand
 
