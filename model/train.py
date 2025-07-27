@@ -9,6 +9,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import joblib
 
+from utils.data_loader import load_data
+
 store_sales = pd.read_csv("Database/sales_data.csv")
 store_sales['Date'] = pd.to_datetime(
     store_sales['Date'], errors='coerce'
@@ -128,6 +130,34 @@ def load_model(path: str = 'model/sales_rf_model.pkl'):
 def predict_sales(model, input_df: pd.DataFrame) -> np.ndarray:
     """Given a feature-engineered DataFrame, predict units sold."""
     return model.predict(input_df)
+
+def get_forecast(store_id, product_id, horizon):
+    # Load & filter
+    df = load_data()
+    df = df[(df["Store ID"]==store_id) & (df["Product ID"]==product_id)]
+    weekly = create_features(df)
+    if len(weekly) < horizon + 1:
+        return None, None, "Insufficient history"
+
+    # Split
+    X = weekly.drop(columns=[
+        'Units_Sold',
+        'Week_Marker',
+        'Week_Start',
+        'Week_End',
+        'Days_in_Week'
+    ])
+    y = weekly["Units_Sold"]
+    X_train, X_test = X.iloc[:-horizon], X.iloc[-horizon:]
+    y_train, y_test = y.iloc[:-horizon], y.iloc[-horizon:]
+
+    # Fit & predict
+    model = build_model()
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+
+    # Return everything needed
+    return weekly, (y_test, preds), None
 
 if __name__ == '__main__':
     # Feature Creation

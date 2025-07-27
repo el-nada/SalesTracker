@@ -187,5 +187,23 @@ def generate_avg_demand(df):
     fig.update_layout(**common_layout)
     return fig 
 
+def make_forecast_chart(weekly, y_test, preds, horizon, store_id, product_id):
+    fig = go.Figure()
+    # actual vs forecast
+    fig.add_trace(go.Scatter(
+        x=weekly["Week_Start"].iloc[-horizon:], y=y_test,
+        mode="markers+lines", name="Actual"
+    ))
+    fig.add_trace(go.Scatter(
+        x=weekly["Week_Start"].iloc[-horizon:], y=preds,
+        mode="markers+lines", name="Forecast"
+    ))
+    fig.update_layout(
+        title=f"{store_id} / {product_id} ({horizon}‑week horizon)",
+        xaxis_title="Week Start", yaxis_title="Units Sold"
+    )
+    fig.update_layout(**common_layout)
+    return fig
+
 def generate_empty_graph():
     return px.bar(title="No Data Available")

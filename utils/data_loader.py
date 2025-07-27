@@ -1,4 +1,6 @@
 import pandas as pd
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 def load_data():
     df = pd.read_csv("Database/sales_data.csv")
@@ -54,6 +56,16 @@ def compute_kpis(df):
         "delta_sales": f"{delta_sales_pct:+.1f}%",
         "units_sold": int(total_units),
         "delta_units": f"{delta_units_pct:+.1f}%",
+    }
+
+def make_forecast_kpis(y_test, preds):
+    mae  = mean_absolute_error(y_test, preds)
+    rmse = np.sqrt(mean_squared_error(y_test, preds))
+    r2   = r2_score(y_test, preds)
+    return {
+      "MAE": f"{mae:.1f}",
+      "RMSE": f"{rmse:.1f}",
+      "R²": f"{r2:.3f}"
     }
 
 def compute_filter_args(df): 
