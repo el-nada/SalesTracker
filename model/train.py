@@ -1,195 +1,169 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import make_pipeline
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import joblib
-import holidays
-from sklearn.metrics import mean_absolute_error
-from sklearn.inspection import partial_dependence
-import lightgbm as lgb
-from sklearn.model_selection import TimeSeriesSplit
 
 
-def prepare_data(df):
-    df = df.copy()
-    df['Date'] = pd.to_datetime(df['Date'])
-    
-    df['DayOfYear'] = df['Date'].dt.dayofyear
-    df['WeekOfYear'] = df['Date'].dt.isocalendar().week
-    df['Quarter'] = df['Date'].dt.quarter
-    
-    df['InventoryRatio'] = df['Inventory Level'] / df['Units Sold'].replace(0, 1)
-    df['StockoutRisk'] = (df['Inventory Level'] < df['Units Sold'].rolling(7).mean()).astype(int)
-    
-    df['PriceRatio'] = df['Price'] / (df['Competitor Pricing'] + 1e-6)
-    df['EffectivePrice'] = df['Price'] * (1 - df['Discount']/100)
-    
-    df = df.sort_values(['Store ID', 'Product ID', 'Date'])
-    for lag in [1, 7, 14]:
-        df[f'Lag_{lag}'] = df.groupby(['Store ID', 'Product ID'])['Units Sold'].shift(lag)
-    
-    for window in [7, 14]:
-        df[f'RollingMean_{window}'] = df.groupby(['Store ID', 'Product ID'])['Lag_1'].transform(
-            lambda x: x.rolling(window, min_periods=1).mean()
+store_sales = pd.read_csv("Database/sales_data.csv")
+store_sales['Date'] = pd.to_datetime(
+    store_sales['Date'], errors='coerce', infer_datetime_format=True
+)
+# Drop rows with invalid dates
+invalid_dates = store_sales['Date'].isna().sum()
+if invalid_dates > 0:
+    print(f"Dropped {invalid_dates} rows due to invalid dates")
+    store_sales = store_sales.dropna(subset=['Date'])
+print("Data loaded. Shape after date parsing:", store_sales.shape)
+
+
+def create_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate daily sales data into weekly features and generate
+    additional engineered features for forecasting.
+    """
+    # Week start marker
+    df['Week_Marker'] = df['Date'] - pd.to_timedelta(
+        df['Date'].dt.dayofweek, unit='D'
+    )
+
+    # Aggregation rules
+    agg_dict = {
+        'Units Sold': 'sum',
+        'Inventory Level': 'mean',
+        'Price': 'mean',
+        'Discount': 'mean',
+        'Promotion': 'mean',
+        'Competitor Pricing': 'mean',
+        'Demand': 'mean',
+        'Units Ordered': 'sum',
+        'Epidemic': 'max',
+        'Store ID': lambda x: x.mode()[0],
+        'Product ID': lambda x: x.mode()[0],
+        'Category': lambda x: x.mode()[0],
+        'Region': lambda x: x.mode()[0],
+        'Date': ['min', 'max', 'count']
+    }
+    weekly = df.groupby('Week_Marker').agg(agg_dict).reset_index()
+
+    # Flatten columns
+    weekly.columns = [
+        'Week_Marker', 'Units_Sold', 'Inventory_Level', 'Price',
+        'Discount', 'Promotion', 'Competitor_Pricing', 'Demand',
+        'Units_Ordered', 'Epidemic', 'Store_ID', 'Product_ID',
+        'Category', 'Region', 'Week_Start', 'Week_End', 'Days_in_Week'
+    ]
+
+    # Drop first and last incomplete weeks
+    weekly = weekly.iloc[1:-1].copy()
+
+    # Temporal features
+    weekly['Week_Num'] = weekly['Week_Start'].dt.isocalendar().week
+    weekly['Month'] = weekly['Week_Start'].dt.month
+    weekly['Quarter'] = weekly['Week_Start'].dt.quarter
+    weekly['Year'] = weekly['Week_Start'].dt.year
+
+    # Advanced features
+    weekly['Price_Change'] = weekly['Price'].pct_change()
+    weekly['Discount_Intensity'] = weekly['Discount'] * weekly['Promotion']
+    weekly['Competitive_Advantage'] = weekly['Competitor_Pricing'] - weekly['Price']
+
+    # Lag features for past 8 weeks
+    lag_weeks = 8
+    for i in range(1, lag_weeks + 1):
+        weekly[f'Sales_Lag_{i}'] = weekly['Units_Sold'].shift(i)
+        weekly[f'Demand_Lag_{i}'] = weekly['Demand'].shift(i)
+
+    # Drop any rows with missing values introduced by lags
+    return weekly.dropna()
+
+def build_model() -> RandomForestRegressor:
+    """
+    Create and return a scikit-learn pipeline that:
+    - Standardizes numerical features
+    - One-hot encodes categorical features
+    - Fits a RandomForestRegressor
+    """
+    # Categorical and numerical feature lists
+    categorical_features = ['Store_ID', 'Product_ID', 'Category', 'Region']
+    numerical_features = [
+        'Inventory_Level', 'Price', 'Discount', 'Promotion',
+        'Competitor_Pricing', 'Demand', 'Week_Num', 'Month',
+        'Quarter', 'Year', 'Price_Change', 'Discount_Intensity',
+        'Competitive_Advantage'
+    ]
+    # Add lag features
+    for i in range(1, 9):
+        numerical_features.extend([f'Sales_Lag_{i}', f'Demand_Lag_{i}'])
+
+    preprocessor = ColumnTransformer([
+        ('num', StandardScaler(), numerical_features),
+        ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_features)
+    ])
+
+    pipeline = make_pipeline(
+        preprocessor,
+        RandomForestRegressor(
+            n_estimators=300,
+            max_depth=10,
+            min_samples_split=5,
+            random_state=42,
+            n_jobs=-1
         )
+    )
+    return pipeline
 
-    cal = holidays.US(years=[2022, 2023])
-    df['IsHoliday'] = df['Date'].dt.date.isin(cal).astype(int)
-    
-    df = df.drop(columns=['Date', 'Units Ordered', 'Demand'])
+def save_model(model, path: str = 'model/sales_rf_model.pkl') -> None:
+    """Save the trained model pipeline to disk using joblib."""
+    joblib.dump(model, path)
+    print(f"Model saved to {path}")
 
-    cat_cols = ['Store ID', 'Product ID', 'Category', 'Region', 
-                'Weather Condition', 'Seasonality']
-    for col in cat_cols:
-        df[col] = df[col].astype('category')
-        
-    return df.dropna()
 
-def safe_mape(y_true, y_pred):
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    non_zero_idx = y_true != 0
-    return np.mean(np.abs((y_true[non_zero_idx] - y_pred[non_zero_idx]) / y_true[non_zero_idx]))
+def load_model(path: str = 'model/sales_rf_model.pkl'):
+    """Load and return a model pipeline from disk."""
+    return joblib.load(path)
 
-def train_model(df):
-    df = prepare_data(df)
-    
-    tscv = TimeSeriesSplit(n_splits=3)
-    X = df.drop(columns=['Units Sold'])
-    y = df['Units Sold']
-    
-    best_score = float('inf')
-    
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X)):
-        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
-        
-        model = lgb.LGBMRegressor(
-            n_estimators=200,
-            learning_rate=0.05,
-            max_depth=5,
-            random_state=42
-        )
-        
-        model.fit(
-            X_train, y_train,
-            eval_set=[(X_val, y_val)],
-            eval_metric='mape',
-            categorical_feature=['Store ID', 'Region']
-        )
-        
-        if model.best_score_['valid_0']['mape'] < best_score:
-            joblib.dump(model, "model/demand_predictor.pkl")
-            best_score = model.best_score_['valid_0']['mape']
-    
-    return model
 
-def historical_validation():
-    print("Running Historical Validation...")
-    df = pd.read_csv("Database/sales_data.csv")
-    train_df = df[pd.to_datetime(df['Date']) < '2023-07-01']
-    test_df = df[pd.to_datetime(df['Date']) >= '2023-07-01']
-    
-    model = train_model(train_df)
-    test_df = prepare_data(test_df)
-    
-    X_test = test_df.drop(columns=['Units Sold'])
-    y_test = test_df['Units Sold']
-    preds = model.predict(X_test)
-    
-    mae = mean_absolute_error(y_test, preds)
-    mape = safe_mape(y_test, preds)
-    
-    print(f"Historical Performance (Last 6 Months):")
-    print(f"  - MAE: {mae:.2f}")
-    print(f"  - MAPE: {mape:.2%}")
-    print(f"  - Understock Rate: {(y_test > preds).mean():.2%}")
-    
-    return {'mae': mae, 'mape': mape, 'predictions': preds}
+def predict_sales(model, input_df: pd.DataFrame) -> np.ndarray:
+    """Given a feature-engineered DataFrame, predict units sold."""
+    return model.predict(input_df)
 
-def business_impact_analysis():
-    print("\nRunning Business Impact Analysis...")
-    val_results = historical_validation()
-    df = pd.read_csv("Database/sales_data.csv")
-    test_df = df[pd.to_datetime(df['Date']) >= '2023-07-01']
-    test_df = prepare_data(test_df)
-    
-    # Simulate business metrics
-    test_df['Predicted'] = val_results['predictions']
-    test_df['Overstock'] = (test_df['Inventory Level'] - test_df['Units Sold']).clip(lower=0)
-    test_df['Stockout'] = (test_df['Units Sold'] > test_df['Inventory Level']).astype(int)
-    
-    waste_cost = test_df['Overstock'].sum() * test_df['Price'].mean() * 0.15
-    lost_sales = test_df[test_df['Stockout'] == 1]['Units Sold'].sum() * test_df['Price'].mean() * 0.3
-    
-    print("Estimated Business Impact:")
-    print(f"  - Potential Waste Reduction: ${waste_cost:,.2f}")
-    print(f"  - Potential Lost Sales Prevention: ${lost_sales:,.2f}")
-    print(f"  - Total Opportunity: ${waste_cost + lost_sales:,.2f}")
-    
-    return {'waste_cost': waste_cost, 'lost_sales': lost_sales}
+if __name__ == '__main__':
+    # Feature Creation
+    weekly_sales = create_features(store_sales)
+    print(f"Weekly data: {len(weekly_sales)} rows from {weekly_sales['Week_Start'].min()} to {weekly_sales['Week_Start'].max()}")
 
-def model_diagnostics():
-    print("\nRunning Model Diagnostics...")
-    model = joblib.load("model/demand_predictor.pkl")
-    df = pd.read_csv("Database/sales_data.csv")
-    df = prepare_data(df)
-    
-    importance = pd.DataFrame({
-        'Feature': model.booster_.feature_name(),
-        'Importance': model.booster_.feature_importance()
-    }).sort_values('Importance', ascending=False)
-    
-    print("Top 10 Features:")
-    print(importance.head(10))
-    
-    # Partial Dependence
-    print("\nPartial Dependence Samples:")
-    for feature in ['Price', 'Discount', 'Lag_7']:
-        if feature in importance['Feature'].values:
-            pdp = partial_dependence(model, df.drop(columns=['Units Sold']), 
-                                   features=[feature])
-            print(f"  - {feature}: Min Effect {min(pdp['average'][0]):.2f}, Max Effect {max(pdp['average'][0]):.2f}")
-    
-    return importance
+    # Prepare train/test split
+    target = 'Units_Sold'
+    X = weekly_sales.drop(columns=[target, 'Week_Marker', 'Week_Start', 'Week_End', 'Days_in_Week'])
+    y = weekly_sales[target]
+    test_size = 8
+    X_train, X_test = X.iloc[:-test_size], X.iloc[-test_size:]
+    y_train, y_test = y.iloc[:-test_size], y.iloc[-test_size:]
 
-def sensitivity_analysis():
-    print("\nRunning Sensitivity Analysis...")
-    model = joblib.load("model/demand_predictor.pkl")
-    df = pd.read_csv("Database/sales_data.csv")
-    base_df = prepare_data(df)
-    
-    scenarios = []
-    for epidemic in [0, 1]:
-        for discount in [0, 30]:
-            test_df = base_df.copy()
-            test_df['Epidemic'] = epidemic
-            test_df['Discount'] = discount
-            preds = model.predict(test_df.drop(columns=['Units Sold']))
-            
-            scenarios.append({
-                'Epidemic': epidemic,
-                'Discount': discount,
-                'AvgPrediction': np.mean(preds),
-                'PctChange': (np.mean(preds) - np.mean(base_df['Units Sold'])) / np.mean(base_df['Units Sold'])
-            })
-    
-    results = pd.DataFrame(scenarios)
-    print("Scenario Analysis:")
-    print(results)
-    
-    return results
+    # Train and save model
+    model = build_model()
+    model.fit(X_train, y_train)
+    save_model(model)
 
-# ----------------------------
-# 4. Main Execution
-# ----------------------------
-if __name__ == "__main__":
-    print("="*50)
-    print("Sales Prediction Model Test Suite")
-    print("="*50)
-    
-    # Run all tests
-    hist_val = historical_validation()
-    business_impact = business_impact_analysis()
-    diagnostics = model_diagnostics()
-    sensitivity = sensitivity_analysis()
-    
-    print("\nAll tests completed!")
+    # Evaluate
+    y_pred = model.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+    print(f"Evaluation metrics -> RMSE: {rmse:.2f}, MAE: {mae:.2f}, R²: {r2:.4f}")
+
+    # Visualization
+    plt.figure(figsize=(12, 6))
+    plt.plot(weekly_sales['Week_Start'].iloc[:-test_size], y_train, label='Train')
+    plt.plot(weekly_sales['Week_Start'].iloc[-test_size:], y_test, 'g-', label='Actual')
+    plt.plot(weekly_sales['Week_Start'].iloc[-test_size:], y_pred, 'r--', label='Predicted')
+    plt.xlabel('Week Start')
+    plt.ylabel('Units Sold')
+    plt.title('Sales Forecast vs Actual')
+    plt.legend(); plt.grid(True); plt.show()
