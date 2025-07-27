@@ -9,18 +9,14 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import joblib
 
-
 store_sales = pd.read_csv("Database/sales_data.csv")
 store_sales['Date'] = pd.to_datetime(
-    store_sales['Date'], errors='coerce', infer_datetime_format=True
+    store_sales['Date'], errors='coerce'
 )
 # Drop rows with invalid dates
 invalid_dates = store_sales['Date'].isna().sum()
 if invalid_dates > 0:
-    print(f"Dropped {invalid_dates} rows due to invalid dates")
     store_sales = store_sales.dropna(subset=['Date'])
-print("Data loaded. Shape after date parsing:", store_sales.shape)
-
 
 def create_features(df: pd.DataFrame) -> pd.DataFrame:
     """
